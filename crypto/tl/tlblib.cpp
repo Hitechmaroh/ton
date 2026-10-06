@@ -16,6 +16,7 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+#include <set>
 #include <tl/tlblib.hpp>
 
 namespace tlb {
@@ -45,7 +46,7 @@ bool Bool::print_skip(PrettyPrinter& pp, vm::CellSlice& cs) const {
 }
 
 bool NatWidth::print_skip(PrettyPrinter& pp, vm::CellSlice& cs) const {
-  long long value = (long long)cs.fetch_ulong(32);
+  long long value = (long long)cs.fetch_ulong(n);
   return value >= 0 && pp.out_int(value);
 }
 
@@ -125,6 +126,10 @@ bool TupleT::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
 }
 
 bool TLB::validate_ref_internal(int* ops, Ref<vm::Cell> cell_ref, bool weak) const {
+  auto cache = ValidateCache::get();
+  if (cache && !(*cache)(this, cell_ref)) {
+    return true;
+  }
   if (ops) {
     if (*ops <= 0) {
       return false;
@@ -133,7 +138,13 @@ bool TLB::validate_ref_internal(int* ops, Ref<vm::Cell> cell_ref, bool weak) con
   }
   bool is_special;
   auto cs = load_cell_slice_special(std::move(cell_ref), is_special);
-  return always_special() ? is_special : (is_special ? weak : (validate_skip(ops, cs) && cs.empty_ext()));
+  if (cs.special_type() == vm::Cell::SpecialType::PrunnedBranch && weak) {
+    return true;
+  }
+  if (always_special() != is_special) {
+    return false;
+  }
+  return validate_skip(ops, cs, weak) && cs.empty_ext();
 }
 
 bool TLB::print_skip(PrettyPrinter& pp, vm::CellSlice& cs) const {
@@ -188,6 +199,13 @@ bool TLB::print_ref(std::ostream& os, Ref<vm::Cell> cell_ref, int indent, int re
   PrettyPrinter pp{os, indent};
   pp.set_limit(rec_limit);
   return pp.fail_unless(print_ref(pp, std::move(cell_ref)));
+}
+
+bool TLB::print_ref(td::StringBuilder& sb, Ref<vm::Cell> cell_ref, int indent, int rec_limit) const {
+  std::ostringstream ss;
+  auto result = print_ref(ss, std::move(cell_ref), indent, rec_limit);
+  sb << ss.str();
+  return result;
 }
 
 std::string TLB::as_string_skip(vm::CellSlice& cs, int indent) const {
@@ -382,6 +400,16 @@ const TLB* TypenameLookup::lookup(td::Slice str) const {
   auto it = std::lower_bound(types.begin(), types.end(), str,
                              [](const auto& x, const auto& y) { return td::Slice(x.first) < y; });
   return it != types.end() && td::Slice(it->first) == str ? it->second : nullptr;
+}
+
+TLB::ValidateCache TLB::ValidateCache::create_for_type(const TLB* type) {
+  return ValidateCache{
+      [s = td::HashSet<vm::CellHash>(), type](const TLB* t, const td::Ref<vm::Cell>& cell) mutable -> bool {
+        if (type != t) {
+          return true;
+        }
+        return s.insert(cell->get_hash()).second;
+      }};
 }
 
 }  // namespace tlb

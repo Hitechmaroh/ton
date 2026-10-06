@@ -85,6 +85,22 @@ fun rshiftr4mod(x: int): (int, int)
 fun rshift3mod(x: int): (int, int)
     asm "3 RSHIFT#MOD";
 
+@pure
+fun qrshiftr(x: int, y: int): int
+    asm "QRSHIFTR";
+
+@pure
+fun qmodpow2(x: int, y: int): int
+    asm "QMODPOW2";
+
+@pure
+fun qrshiftmod(x: int, y: int): (int, int)
+    asm "QRSHIFTMOD";
+
+@pure
+fun qaddrshiftmod(x: int, w: int, y: int): (int, int)
+    asm "QADDRSHIFTMOD";
+
 /// computes y - x (Tolk compiler does not try to use this by itself)
 @pure
 fun sub_rev(x: int, y: int): int
@@ -103,28 +119,27 @@ fun is_nan(x: int): int
 /// computes sqrt(a*b) exactly rounded to the nearest integer
 /// for all 0 <= a, b <= 2^256-1
 /// may be used with b=1 or b=scale of fixed-point numbers
-@pure
 @inline_ref
 fun geom_mean(a: int, b: int): int {
-    if (!min(a, b)) {
+    if (min(a, b) == 0) {
     return 0;
     }
     var s: int = log2_floor_p1(a);   // throws out of range error if a < 0 or b < 0
     var t: int = log2_floor_p1(b);
     // NB: (a-b)/2+b == (a+b)/2, but without overflow for large a and b
     var x: int = (s == t ? (a - b) / 2 + b : 1 << ((s + t) / 2));
+    var q: int;
     do {
     // if always used with b=2^const, may be optimized to "const LSHIFTDIVC#"
     // it is important to use `mulDivCeil` here, not `mulDivFloor` or `mulDivRound`
-    var q: int = (mulDivCeil(a, b, x) - x) / 2;
+    q = (mulDivCeil(a, b, x) - x) / 2;
     x += q;
-    } while (q);
+    } while (q != 0);
     return x;
 }
 
 /// integer square root, computes round(sqrt(a)) for all a>=0.
 /// note: `inline` is better than `inline_ref` for such simple functions
-@pure
 @inline
 fun sqrt(a: int): int {
     return geom_mean(a, 1);
@@ -132,28 +147,24 @@ fun sqrt(a: int): int {
 
 /// version for fixed248 = fixed-point numbers with scale 2^248
 /// fixed248 sqrt(fixed248 x)
-@pure
 @inline
 fun fixed248_sqrt(x: int): int {
     return geom_mean(x, 1 << 248);
 }
 
 /// fixed255 sqrt(fixed255 x)
-@pure
 @inline
 fun fixed255_sqrt(x: int): int {
     return geom_mean(x, 1 << 255);
 }
 
 /// fixed248 sqr(fixed248 x);
-@pure
 @inline
 fun fixed248_sqr(x: int): int {
     return mulDivRound(x, x, 1 << 248);
 }
 
 /// fixed255 sqr(fixed255 x);
-@pure
 @inline
 fun fixed255_sqr(x: int): int {
     return mulDivRound(x, x, 1 << 255);
@@ -167,62 +178,53 @@ const fixed255_One: int = (1 << 255);
 /// store huge constants in inline_ref functions for reuse
 /// (y,z) where y=round(log(2)*2^256), z=round((log(2)*2^256-y)*2^128)
 /// then log(2) = y/2^256 + z/2^384
-@pure
 @inline_ref
 fun log2_xconst_f256(): (int, int) {
     return (80260960185991308862233904206310070533990667611589946606122867505419956976172, -32272921378999278490133606779486332143);
 }
 
 /// (y,z) where Pi = y/2^254 + z/2^382
-@pure
 @inline_ref
 fun Pi_xconst_f254(): (int, int) {
     return (90942894222941581070058735694432465663348344332098107489693037779484723616546, 108051869516004014909778934258921521947);
 }
 
 /// atan(1/16) as fixed260
-@pure
 @inline_ref
 fun Atan1_16_f260(): int {
     return 115641670674223639132965820642403718536242645001775371762318060545014644837101;  // true value is ...101.0089...
 }
 
 /// atan(1/8) as fixed259
-@pure
 @inline_ref
 fun Atan1_8_f259(): int {
     return 115194597005316551477397594802136977648153890007566736408151129975021336532841;  // correction -0.1687...
 }
 
 /// atan(1/32) as fixed261
-@pure
 @inline_ref
 fun Atan1_32_f261(): int {
     return 115754418570128574501879331591757054405465733718902755858991306434399246026247;  // correction 0.395...
 }
 
 /// inline is better than inline_ref for such very small functions
-@pure
 @inline
 fun log2_const_f256(): int {
     var (c: int, _) = log2_xconst_f256();
     return c;
 }
 
-@pure
 @inline
 fun fixed248_log2_const(): int {
     return log2_const_f256() ~>> 8;
 }
 
-@pure
 @inline
 fun Pi_const_f254(): int {
-    var (c: auto, _) = Pi_xconst_f254();
+    var (c, _) = Pi_xconst_f254();
     return c;
 }
 
-@pure
 @inline
 fun fixed248_Pi_const(): int {
     return Pi_const_f254() ~>> 6;
@@ -233,7 +235,6 @@ fun fixed248_Pi_const(): int {
 /// hyperbolic tangent of small x via n+2 terms of Lambert's continued fraction
 /// n=17: good for |x| < log(2)/4 = 0.173
 /// fixed258 tanh_f258(fixed258 x, int n)
-@pure
 @inline_ref
 fun tanh_f258(x: int, n: int): int {
     var x2: int = mulDivRound(x, x, 1 << 255);     // x^2 as fixed261
@@ -251,7 +252,6 @@ fun tanh_f258(x: int, n: int): int {
 /// fixed257 expm1_f257(fixed257 x)
 /// computes exp(x)-1 for small x via 19 terms of Lambert's continued fraction for tanh(x/2)
 /// good for |x| < log(2)/2 = 0.347 (n=17); consumes ~3500 gas
-@pure
 @inline_ref
 fun expm1_f257(x: int): int {
     // (almost) compute tanh(x/2) first; x/2 as fixed258 = x as fixed257
@@ -271,13 +271,12 @@ fun expm1_f257(x: int): int {
 /// expm1_f257() may be used to implement specific fixed-point exponentials
 /// example:
 /// fixed248 exp(fixed248 x)
-@pure
 @inline_ref
-fun fixed248_exp(x: int): int {
+fun fixed248_exp(x_: int): int {
     var (l2c, l2d) = log2_xconst_f256();
     // divide x by log(2) and convert to fixed257
     // (int q, x) = muldivmodr(x, 256, l2c);  // unfortunately, no such built-in
-    var (q: int, x redef) = lshiftdivmodr(x, l2c, 8);
+    var (q: int, x) = lshiftdivmodr(x_, l2c, 8);
     x = 2 * x - mulDivRound(q, l2d, 1 << 127);
     var y: int = expm1_f257(x);
     // result is (1 + y) * (2^q) --> ((1 << 257) + y) >> (9 - q)
@@ -287,11 +286,10 @@ fun fixed248_exp(x: int): int {
 
 /// compute 2^x in fixed248
 /// fixed248 exp2(fixed248 x)
-@pure
 @inline_ref
-fun fixed248_exp2(x: int): int {
+fun fixed248_exp2(x_: int): int {
     // (int q, x) = divmodr(x, 1 << 248);   // no such built-in
-    var (q: int, x redef) = rshiftr248mod(x);
+    var (q: int, x) = rshiftr248mod(x_);
     x = mulDivRound(x, log2_const_f256(), 1 << 247);
     var y: int = expm1_f257(x);
     return (y ~>> (9 - q)) - (-1 << (248 + q));
@@ -301,7 +299,6 @@ fun fixed248_exp2(x: int): int {
 
 /// fixed260 tan(fixed260 x);
 /// computes tan(x) for small |x|<atan(1/16) via 16 terms of Lambert's continued fraction
-@pure
 @inline
 fun tan_f260_inlined(x: int): int {
     var x2: int = mulrshiftr256(x, x);     // x^2 as fixed264
@@ -317,7 +314,6 @@ fun tan_f260_inlined(x: int): int {
 }
 
 /// fixed260 tan(fixed260 x);
-@pure
 @inline_ref
 fun tan_f260(x: int): int {
     return tan_f260_inlined(x);
@@ -325,7 +321,6 @@ fun tan_f260(x: int): int {
 
 /// fixed258 tan(fixed258 x);
 /// computes tan(x) for small |x|<atan(1/4) via 20 terms of Lambert's continued fraction
-@pure
 @inline
 fun tan_f258_inlined(x: int): int {
     var x2: int = mulrshiftr256(x, x);     // x^2 as fixed260
@@ -341,7 +336,6 @@ fun tan_f258_inlined(x: int): int {
 }
 
 /// fixed258 tan(fixed258 x);
-@pure
 @inline_ref
 fun tan_f258(x: int): int {
     return tan_f258_inlined(x);
@@ -349,7 +343,6 @@ fun tan_f258(x: int): int {
 
 /// (fixed259, fixed263) sincosm1(fixed259 x)
 /// computes (sin(x), 1-cos(x)) for small |x|<2*atan(1/16)
-@pure
 @inline
 fun sincosm1_f259_inlined(x: int): (int, int) {
     var t: int = tan_f260_inlined(x);   // t=tan(x/2) as fixed260
@@ -360,7 +353,6 @@ fun sincosm1_f259_inlined(x: int): (int, int) {
     return (t - mulDivRound(t / 2, tt, y) ~/ 256, tt - mulDivRound(tt / 2, tt, y) ~/ 256);
 }
 
-@pure
 @inline_ref
 fun sincosm1_f259(x: int): (int, int) {
     return sincosm1_f259_inlined(x);
@@ -369,7 +361,6 @@ fun sincosm1_f259(x: int): (int, int) {
 /// computes (sin(x+xe),-cos(x+xe)) for |x| <= Pi/4, xe very small
 /// this function is very accurate, error less than 0.7 ulp (consumes ~ 5500 gas)
 /// (fixed256, fixed256) sincosn(fixed256 x, fixed259 xe)
-@pure
 @inline_ref
 fun sincosn_f256(x: int, xe: int): (int, int) {
     // var (q, x1) = muldivmodr(x, 8, Atan1_8_f259());  // no muldivmodr() builtin
@@ -383,16 +374,15 @@ fun sincosn_f256(x: int, xe: int): (int, int) {
     // now a/c = cos(q*theta), b/c = sin(q*theta) exactly(!)
     // compute (a+b*I)*(1-co+si*I)/c
     // (b, a) = (lshift256divr(b, c), lshift256divr(a, c));
-    var (b redef, br: int) = lshift256divmodr(b, c);  br = mulDivRound(br, 128, c);
-    var (a redef, ar: int) = lshift256divmodr(a, c);  ar = mulDivRound(ar, 128, c);
-    return (sign(x) * (((mulrshiftr256(b, co) - br) ~/ 16 - mulrshiftr256(a, si)) ~/ 8 - b),
-    a - ((mulrshiftr256(a, co) - ar) ~/ 16 + mulrshiftr256(b, si)) ~/ 8);
+    var (newB, br: int) = lshift256divmodr(b, c);  br = mulDivRound(br, 128, c);
+    var (newA, ar: int) = lshift256divmodr(a, c);  ar = mulDivRound(ar, 128, c);
+    return (sign(x) * (((mulrshiftr256(newB, co) - br) ~/ 16 - mulrshiftr256(newA, si)) ~/ 8 - newB),
+    newA - ((mulrshiftr256(newA, co) - ar) ~/ 16 + mulrshiftr256(newB, si)) ~/ 8);
 }
 
 /// compute (sin(x),1-cos(x)) in fixed256 for |x| < 16*atan(1/16) = 0.9987
 /// (fixed256, fixed257) sincosm1_f256(fixed256 x);
 /// slightly less accurate than sincosn_f256() (error up to 3/2^256), but faster (~ 4k gas) and shorter
-@pure
 @inline_ref
 fun sincosm1_f256(x: int): (int, int) {
     var (si, co) = sincosm1_f259_inlined(x);   // compute (sin,1-cos)(x/8) in (fixed259,fixed263)
@@ -407,7 +397,6 @@ fun sincosm1_f256(x: int): (int, int) {
 
 /// compute (p, q) such that p/q = tan(x) for |x|<2*atan(1/2)=1899/2048=0.927
 /// (int, int) tan_aux(fixed256 x);
-@pure
 @inline_ref
 fun tan_aux_f256(x: int): (int, int) {
     var t: int = tan_f258_inlined(x);   // t=tan(x/4) as fixed258
@@ -420,12 +409,11 @@ fun tan_aux_f256(x: int): (int, int) {
 /// sincosm1_f256() and sincosn_f256() may be used to implement trigonometric functions for different fixed-point types
 /// example:
 /// (fixed248, fixed248) sincos(fixed248 x);
-@pure
 @inline_ref
-fun fixed248_sincos(x: int): (int, int) {
+fun fixed248_sincos(x_: int): (int, int) {
     var (Pic, Pid) = Pi_xconst_f254();
     // (int q, x) = muldivmodr(x, 128, Pic);  // no muldivmodr() builtin
-    var (q: int, x redef) = lshift7divmodr(x, Pic);  // reduce mod Pi/2
+    var (q: int, x) = lshift7divmodr(x_, Pic);  // reduce mod Pi/2
     x = 2 * x - mulDivRound(q, Pid, 1 << 127);
     var (si: int, co: int) = sincosm1_f256(x);   // doesn't make sense to use more accurate sincosn_f256()
     co = (1 << 248) - (co ~>> 9);
@@ -438,7 +426,6 @@ fun fixed248_sincos(x: int): (int, int) {
 
 /// fixed248 sin(fixed248 x);
 /// inline is better than inline_ref for such simple functions
-@pure
 @inline
 fun fixed248_sin(x: int): int {
     var (si: int, _) = fixed248_sincos(x);
@@ -446,7 +433,6 @@ fun fixed248_sin(x: int): int {
 }
 
 /// fixed248 cos(fixed248 x);
-@pure
 @inline
 fun fixed248_cos(x: int): int {
     var (_, co: int) = fixed248_sincos(x);
@@ -457,29 +443,27 @@ fun fixed248_cos(x: int): int {
 /// fixed248 tan(fixed248 x);
 /// not very accurate when |tan(x)| is very large (difficult to do better without floating-point numbers)
 /// however, the relative accuracy is approximately 2^-247 in all cases, which is good enough for arguments given up to 2^-249
-@pure
 @inline_ref
-fun fixed248_tan(x: int): int {
+fun fixed248_tan(x_: int): int {
     var (Pic, Pid) = Pi_xconst_f254();
     // (int q, x) = muldivmodr(x, 128, Pic);  // no muldivmodr() builtin
-    var (q: int, x redef) = lshift7divmodr(x, Pic);  // reduce mod Pi/2
+    var (q: int, x) = lshift7divmodr(x_, Pic);  // reduce mod Pi/2
     x = 2 * x - mulDivRound(q, Pid, 1 << 127);
     var (a, b) = tan_aux_f256(x);  // now a/b = tan(x')
-    if (q & 1) {
+    if ((q & 1) != 0) {
     (a, b) = (b, -a);
     }
     return mulDivRound(a, 1 << 248, b);   // either -b/a or a/b as fixed248
 }
 
 /// fixed248 cot(fixed248 x);
-@pure
 @inline_ref
-fun fixed248_cot(x: int): int {
+fun fixed248_cot(x_: int): int {
     var (Pic, Pid) = Pi_xconst_f254();
-    var (q: int, x redef) = lshift7divmodr(x, Pic);  // reduce mod Pi/2
+    var (q: int, x) = lshift7divmodr(x_, Pic);  // reduce mod Pi/2
     x = 2 * x - mulDivRound(q, Pid, 1 << 127);
     var (b, a) = tan_aux_f256(x);  // now b/a = tan(x')
-    if (q & 1) {
+    if ((q & 1) != 0) {
     (a, b) = (b, -a);
     }
     return mulDivRound(a, 1 << 248, b);   // either -b/a or a/b as fixed248
@@ -492,7 +476,6 @@ fun fixed248_cot(x: int): int {
 /// |x| < 1/8 if n=32;  |x| < 2^-3.5 if n=28;  |x| < 1/16 if n=25
 /// |x| < 2^-4.5 if n=23;  |x| < 1/32 if n=21;  |x| < 1/64 if n=18
 /// fixed258 atanh(fixed258 x);
-@pure
 @inline_ref
 fun atanh_f258(x: int, n: int): int {
     var x2: int = mulrshiftr256(x, x);  // x^2 as fixed260
@@ -513,7 +496,6 @@ fun atanh_f258(x: int, n: int): int {
 
 /// number of terms n should be chosen as for atanh_f258()
 /// fixed261 atanh(fixed261 x);
-@pure
 @inline
 fun atanh_f261_inlined(x: int, n: int): int {
     var x2: int = mulrshiftr256(x, x);  // x^2 as fixed266
@@ -533,7 +515,6 @@ fun atanh_f261_inlined(x: int, n: int): int {
 }
 
 /// fixed261 atanh(fixed261 x);
-@pure
 @inline_ref
 fun atanh_f261(x: int, n: int): int {
     return atanh_f261_inlined(x, n);
@@ -541,7 +522,6 @@ fun atanh_f261(x: int, n: int): int {
 
 /// returns (y, s) such that log(x) = y/2^257 + s*log(2) for positive integer x
 /// (fixed257, int) log_aux(int x)
-@pure
 @inline_ref
 fun log_aux_f257(x: int): (int, int) {
     var s: int = log2_floor_p1(x);
@@ -559,7 +539,6 @@ fun log_aux_f257(x: int): (int, int) {
 }
 
 /// computes 33^m for small m
-@pure
 @inline
 fun pow33(m: int): int {
     var t: int = 1;
@@ -571,7 +550,6 @@ fun pow33(m: int): int {
 
 /// computes 33^m for small 0<=m<=22
 /// slightly faster than pow33()
-@pure
 @inline
 fun pow33b(m: int): int {
     var (mh: int, ml: int) = divMod(m, 5);
@@ -587,7 +565,6 @@ fun pow33b(m: int): int {
 
 /// returns (s, q, y) such that log(x) = s*log(2) + q*log(33/32) + y/2^260 for positive integer x
 /// (int, int, fixed260) log_auxx_f260(int x);
-@pure
 @inline_ref
 fun log_auxx_f260(x: int): (int, int, int) {
     var s: int = log2_floor_p1(x) - 1;
@@ -608,7 +585,6 @@ fun log_auxx_f260(x: int): (int, int, int) {
 /// this function is very precise (error less than 0.6 ulp) and consumes < 7k gas
 /// may be used to implement specific fixed-point instances of log() and log2()
 /// (fixed256, int) log_aux_f256(int x);
-@pure
 @inline_ref
 fun log_aux_f256(x: int): (int, int) {
     var (s, q, y) = log_auxx_f260(x);
@@ -624,7 +600,6 @@ fun log_aux_f256(x: int): (int, int) {
 /// this function is very precise (error less than 0.6 ulp) and consumes < 7k gas
 /// may be used to implement specific fixed-point instances of log() and log2()
 /// (fixed256, int) log2_aux_f256(int x);
-@pure
 @inline_ref
 fun log2_aux_f256(x: int): (int, int) {
     var (s, q, y) = log_auxx_f260(x);
@@ -636,7 +611,6 @@ fun log2_aux_f256(x: int): (int, int) {
 
 
 /// fixed248 log(fixed248 x)
-@pure
 @inline_ref
 fun fixed248_log(x: int): int {
     var (y, s) = log_aux_f256(x);
@@ -645,7 +619,6 @@ fun fixed248_log(x: int): int {
 }
 
 /// fixed248 log2(fixed248 x)
-@pure
 @inline
 fun fixed248_log2(x: int): int {
     var (y, s) = log2_aux_f256(x);
@@ -654,14 +627,13 @@ fun fixed248_log2(x: int): int {
 
 /// computes x^y as exp(y*log(x)), x >= 0
 /// fixed248 pow(fixed248 x, fixed248 y);
-@pure
 @inline_ref
 fun fixed248_pow(x: int, y: int): int {
-    if (!y) {
+    if (y == 0) {
     return 1 << 248;   // x^0 = 1
     }
     if (x <= 0) {
-    var bad: int = (x | y) < 0;
+    var bad: int = ((x | y) < 0) as int;
     return 0 >> bad;          // 0^y = 0 if x=0 and y>=0; "out of range" exception otherwise
     }
     var (l, s) = log2_aux_f256(x);
@@ -677,7 +649,7 @@ fun fixed248_pow(x: int, y: int): int {
     // now log_2(x^y) = y*log_2(x) = q + ll, ss integer, ll fixed257, -1/2<=ll<1/2
     var sq: int = q + 248;
     if (sq <= 0) {
-    return -(sq == 0);   // underflow
+    return -((sq == 0) as int);   // underflow
     }
     y = expm1_f257(mulrshiftr256(ll, log2_const_f256()));
     return (y ~>> (9 - q)) - (-1 << sq);
@@ -687,7 +659,6 @@ fun fixed248_pow(x: int, y: int): int {
 
 /// number of terms n should be chosen as for atanh_f258()
 /// fixed259 atan(fixed259 x);
-@pure
 @inline_ref
 fun atan_f259(x: int, n: int): int {
     var x2: int = mulrshiftr256(x, x);  // x^2 as fixed262
@@ -706,7 +677,6 @@ fun atan_f259(x: int, n: int): int {
 
 /// number of terms n should be chosen as for atanh_f261()
 /// fixed261 atan(fixed261 x);
-@pure
 @inline
 fun atan_f261_inlined(x: int, n: int): int {
     var x2: int = mulrshiftr256(x, x);  // x^2 as fixed266
@@ -724,7 +694,6 @@ fun atan_f261_inlined(x: int, n: int): int {
 }
 
 /// fixed261 atan(fixed261 x);
-@pure
 @inline_ref
 fun atan_f261(x: int, n: int): int {
     return atan_f261_inlined(x, n);
@@ -734,7 +703,6 @@ fun atan_f261(x: int, n: int): int {
 /// then b/a=atan(q*atan(1/32)) exactly, and (a,b) is almost a unit vector pointing in the direction of (1,x)
 /// must have |x|<1.1, x is fixed24
 /// (int, fixed255, fixed255) atan_aux_prereduce(fixed24 x);
-@pure
 @inline_ref
 fun atan_aux_prereduce(x: int): (int, int, int) {
     var xu: int = abs(x);
@@ -762,7 +730,6 @@ fun atan_aux_prereduce(x: int): (int, int, int) {
 /// this function is reasonably accurate (error < 7 ulp with ulp = 2^-261), but it consumes >7k gas
 /// this is sufficient for most purposes
 /// (int, fixed261) atan_aux(fixed256 x)
-@pure
 @inline_ref
 fun atan_aux_f256(x: int): (int, int) {
     var (q, a, b) = atan_aux_prereduce(x ~>> 232);   // convert x to fixed24
@@ -780,7 +747,6 @@ fun atan_aux_f256(x: int): (int, int) {
 /// this function is very accurate (error < 2 ulp), but it consumes >7k gas
 /// in most cases, faster function atan_aux_f256() should be used
 /// (int, fixed261) atan_auxx(fixed256 x)
-@pure
 @inline_ref
 fun atan_auxx_f256(x: int): (int, int) {
     var (q, a, b) = atan_aux_prereduce(x ~>> 232);   // convert x to fixed24
@@ -803,12 +769,11 @@ fun atan_auxx_f256(x: int): (int, int) {
 
 /// consumes ~ 8k gas
 /// fixed255 atan(fixed255 x);
-@pure
 @inline_ref
 fun atan_f255(x: int): int {
     var s: int = (x ~>> 256);
     x.stackMoveToTop();
-    if (s) {
+    if (s != 0) {
         x = lshift256divr(-1 << 255, x);   // x:=-1/x as fixed256
     } else {
         x *= 2;   // convert to fixed256
@@ -822,7 +787,6 @@ fun atan_f255(x: int): int {
 
 /// computes atan(x) for -1 <= x < 1 only
 /// fixed256 atan_small(fixed256 x);
-@pure
 @inline_ref
 fun atan_f256_small(x: int): int {
     var (q, z) = atan_aux_f256(x);
@@ -832,11 +796,10 @@ fun atan_f256_small(x: int): int {
 }
 
 /// fixed255 asin(fixed255 x);
-@pure
 @inline_ref
 fun asin_f255(x: int): int {
     var a: int = fixed255_One - fixed255_sqr(x);  // a:=1-x^2
-    if (!a) {
+    if (a == 0) {
     return sign(x) * Pi_const_f254();   // Pi/2 or -Pi/2
     }
     var y: int = fixed255_sqrt(a);   // sqrt(1-x^2)
@@ -845,7 +808,6 @@ fun asin_f255(x: int): int {
 }
 
 /// fixed254 acos(fixed255 x);
-@pure
 @inline_ref
 fun acos_f255(x: int): int {
     var Pi: int = Pi_const_f254();
@@ -860,7 +822,6 @@ fun acos_f255(x: int): int {
 
 /// consumes ~ 10k gas
 /// fixed248 asin(fixed248 x)
-@pure
 @inline
 fun fixed248_asin(x: int): int {
     return asin_f255(x << 7) ~>> 7;
@@ -868,7 +829,6 @@ fun fixed248_asin(x: int): int {
 
 /// consumes ~ 10k gas
 /// fixed248 acos(fixed248 x)
-@pure
 @inline
 fun fixed248_acos(x: int): int {
     return acos_f255(x << 7) ~>> 6;
@@ -876,12 +836,11 @@ fun fixed248_acos(x: int): int {
 
 /// consumes ~ 7500 gas
 /// fixed248 atan(fixed248 x);
-@pure
 @inline_ref
 fun fixed248_atan(x: int): int {
     var s: int = (x ~>> 249);
     x.stackMoveToTop();
-    if (s) {
+    if (s != 0) {
         s = sign(s);
         x = lshift256divr(-1 << 248, x);   // x:=-1/x as fixed256
     } else {
@@ -893,12 +852,11 @@ fun fixed248_atan(x: int): int {
 }
 
 /// fixed248 acot(fixed248 x);
-@pure
 @inline_ref
 fun fixed248_acot(x: int): int {
     var s: int = (x ~>> 249);
     x.stackMoveToTop();
-    if (s) {
+    if (s != 0) {
         x = lshift256divr(-1 << 248, x);   // x:=-1/x as fixed256
         s = 0;
     } else {
@@ -921,7 +879,7 @@ fun nrand_f252(): int {
     var (x, s, t, A, B, r0) = (nan(), 29483 << 236, -3167 << 239, 12845, 16693, 9043);
     // 4/sqrt(e*Pi) = 1.369 loop iterations on average
     do {
-        var (u, v) = (random() / 16 + 1, mulDivRound(random() - (1 << 255), 7027, 1 << 16));   // fixed252; 7027=ceil(sqrt(8/e)*2^12)
+        var (u, v) = (random.uint256() / 16 + 1, mulDivRound(random.uint256() - (1 << 255), 7027, 1 << 16));   // fixed252; 7027=ceil(sqrt(8/e)*2^12)
         var va: int = abs(v);
         var (u1, v1) = (u - s, va - t);   // (u - 29483/2^16, abs(v) + 3167/2^13) as fixed252
         // Q := u1^2 + v1 * (A*v1 - B*u1) as fixed252 where A=12845/2^16, B=16693/2^16
@@ -941,7 +899,7 @@ fun nrand_f252(): int {
                 }
             }
         }
-    } while (!(~ is_nan(x)));
+    } while ((~ is_nan(x)) == 0);
     return x;
 }
 
@@ -952,7 +910,7 @@ fun nrand_f252(): int {
 fun nrand_fast_f252(): int {
     var t: int = -3 << 253;   // -6. as fixed252
     repeat (12) {
-        t += random() / 16;         // add together 12 uniformly random numbers
+        t += random.uint256() / 16;         // add together 12 uniformly random numbers
     }
     return t;
 }
@@ -961,7 +919,7 @@ fun nrand_fast_f252(): int {
 /// fixed248 random();
 @inline
 fun fixed248_random(): int {
-    return random() >> 8;
+    return random.uint256() >> 8;
 }
 
 /// random number with standard normal distribution
@@ -979,14 +937,14 @@ fun fixed248_nrand_fast(): int {
 }
 
 @pure
-fun tset<X>(mutate self: tuple, idx: int, value: X): void
+fun tuple.tset<X>(mutate self, idx: int, value: X): void
     asm(self value idx) "SETINDEXVAR";
 
 // computes 1-acos(x)/Pi by a very simple, extremely slow (~70k gas) and imprecise method
 // fixed256 acos_prepare_slow(fixed255 x);
 @inline
 fun acos_prepare_slow_f255(x: int): int {
-  x -= (x == 0);
+  x -= (x == 0) as int;
   var t: int = 1;
   repeat (255) {
     t = t * sign(x) * 2 + 1;    // decode Gray code (sign(x_0), sign(x_1), ...)
@@ -1014,12 +972,13 @@ fun asin_slow_f255(x: int): int {
 fun test_nrand(n: int): tuple {
   var t: tuple = createEmptyTuple();
   repeat (255) {
-    t.tuplePush(0);
+    t.push(0);
   }
   repeat (n) {
     var x: int = fixed248_nrand();
     var bucket: int = (abs(x) >> 243);   // 255 buckets starting from x=0, each 1/32 wide
-    t.tset(bucket, t.tupleAt(bucket) + 1);
+    var at_bucket: int = t.get(bucket) as int;
+    t.tset(bucket, at_bucket + 1);
   }
   return t;
 }
@@ -1141,6 +1100,30 @@ fun fixed248_atan_test(x:int): int {
 @method_id(10028)
 fun fixed248_acot_test(x:int): int {
     return  fixed248_acot(x);
+}
+
+@method_id(10029)
+fun quiet_shrmod_nan_shift_test(): (int, int, int, int, int, int) {
+    var shift: int = nan();
+    var rshifted = qrshiftr(12345, shift);
+    var modded = qmodpow2(12345, shift);
+    var (q1, r1) = qrshiftmod(12345, shift);
+    var (q2, r2) = qaddrshiftmod(1000, 2345, shift);
+    return (is_nan(rshifted), is_nan(modded), is_nan(q1), is_nan(r1), is_nan(q2), is_nan(r2));
+}
+
+@method_id(10030)
+fun muldiv_zero_num_unknown_div(z: int): int {
+    try {
+        return mulDivFloor(0, 5, z);
+    } catch (excNo) {
+        return -excNo;
+    }
+}
+
+@method_id(10031)
+fun muldiv_zero_num_known_div(y: int): int {
+    return mulDivFloor(0, y, 5);
 }
 
 fun main() {
@@ -1284,4 +1267,16 @@ fun main() {
 
 @testcase | 10027 |   (1<<248)//5 | 89284547973388213553327350968415123522888028497458323165947767504203347189
 @testcase | 10028 |   (1<<248)//239 | 708598849781543798951441405045469962900811296151941404481049216461523216127
+@testcase | 10029 |   | -1 -1 -1 -1 -1 -1
+@testcase | 10030 |  0 | -4
+@testcase | 10030 |  5 | 0
+@testcase | 10031 | 99 | 0
+
+@fif_codegen
+"""
+  muldiv_zero_num_known_div() PROC:<{
+    DROP
+    0 PUSHINT
+  }>
+"""
 */
